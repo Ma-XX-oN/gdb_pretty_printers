@@ -24,7 +24,7 @@ def make_enums_tag(val, enum_tuple):
   """
   base_type = val.type.pointer()
   array_type = base_type
-  for enum in enum_tuple:
+  for enum in reversed(enum_tuple):
     array_type = array_type.array(enum - 1)
   log(f"array_type: {array_type}\n")
   ptr_type = array_type.pointer().pointer().pointer().pointer()
@@ -46,7 +46,7 @@ def extract_enums_tag(val):
   """
   type_str = str(val.type)
   matches = re.findall(r'\[(\d+)\]', type_str)
-  return tuple(int(m) for m in reversed(matches))
+  return tuple(int(m) for m in matches)
 
 
 def recover_value(val):
