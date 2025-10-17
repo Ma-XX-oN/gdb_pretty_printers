@@ -1,5 +1,5 @@
 import gdb
-from gdb_printers import add_printer, summary, emit_chunked_elements
+from gdb_printers import add_printer, summary
 
 # GDB pretty-printer example for ColorRGBA
 class ComponentsNode:

@@ -1,24 +1,145 @@
+"""
+Framework to make a cohesive, easy to use pretty printer for gdb.  This uses
+synthetic nodes to group data together into static, raw, and other views making
+it easier to read and find information.
+
+To enable, add this to the .vscode/launch.json file:
+```
+          // VV Add these lines to "configurations" => "setupCommands" list VV
+          {
+            "description": "Use relative paths to avoid Windows escaping",
+            // Change this to the folder where you have placed the gdb folder.
+            "text": "-environment-cd ${workspaceFolder}/gdb"
+          },
+          {
+            "description": "Add ${workspaceFolder} (i.e. current dir) to module search path.",
+            "text": "-interpreter-exec console \"python import sys; sys.path.insert(0, '.')\""
+          },
+          // Comment out this section if no logging is needed.
+          // VVV LOCAL LOGGING VVV
+          {
+            "description": "Turn on external gdb logger (LPP)",
+            "text": "-interpreter-exec console \"python import gdb_logger as LPP; LPP.logging_on('gdb_log.txt') \""
+          },
+          {
+              "description": "Configure logging",
+              "text": "-interpreter-exec console \"set logging overwrite on\"",
+              "ignoreFailures": true
+          },
+          {
+              "description": "Set log file",
+              "text": "-interpreter-exec console \"set logging file gdb.txt\"",
+              "ignoreFailures": true
+          },
+          {
+              "description": "Enable logging",
+              "text": "-interpreter-exec console \"set logging on\"",
+              "ignoreFailures": true
+          },
+          // ^^^ LOCAL LOGGING
+          {
+            "description": "Import user pretty printers (UPP)",
+            // Change if this is not the name of your printer python file.
+            "text": "-interpreter-exec console \"python import gdb_user_printers as UPP\""
+          },
+          // ^^ Add these lines to "configurations" => "setupCommands" list ^^
+
+      // Additional logging if needed under "configurations" only output to DEBUG CONSOLE
+      "logging": { "engineLogging": true, "trace": true, "traceResponse": true }
+```
+
+"""
 import gdb
 import re
+import traceback
 
 from gdb_logger import log
 from gdb_synthetic_nodes import make_enums_tag, extract_enums_tag, recover_value
 
-pretty_printers = {}
-pretty_printers_re = []
-def add_printer(type_name, printer):
-  if re.search(r'^(?:::)?[a-zA-Z_][a-zA-Z_0-9]*(?:::[a-zA-Z_][a-zA-Z_0-9]*)*$', type_name):
-    log(f"Adding exact printer for type: {type_name}")
-    pretty_printers[type_name] = printer
-  else:
-    log(f"Adding regex printer for type: {type_name}")
-    pretty_printers_re.append( (re.compile(type_name), printer) )
+_pretty_printers = {}
+_pretty_printers_re = []
 
-def match_printer(type_str):
-  if type_str in pretty_printers:
+def add_printer(type_name, printer):
+  """Add a new printer by specifying a structure.
+
+  Parameters
+  ----------
+  type_name : string
+    The type name to match against to pretty print
+      
+  printer : dict
+      "summary" - lambda(v) : string (optional)
+        - Raw summary.
+        - Can call summary() to generate a default summary of all elements.
+        - If not specified, will show nothing for the summary.
+      "views" - list<dict> (optional)
+        - Each dict has the following members:
+          "name" - string (optional)
+            - Name of the view.  Node will have that name with <> around it.
+            - Recommend to at least capitalise first letter.
+            - If not specified, will show as <View N> where N is the view index.
+          "summary" - lambda(v) : string (optional)
+            - View summary.
+            - Can call summary() to generate a default summary of all elements.
+            - If not specified, will show nothing for the summary.
+          "nodes" - list (optional)
+            - An even number of elements, where:
+              - 1st element is the name of the element, and 
+              - 2nd element is a lambda(v) : {gdb.Value | any}
+          "node" - class object (optional)
+            - For complex views, it may be necessary to write a full blown class
+              pretty printer.
+            - Specifying this will prevent "nodes" item from being looked at.
+        "default_view" - string (optional)
+          - Name of view to show at top level.
+          - If not specified, the raw view will be at top level.
+  """
+  log(f"Adding exact printer for type: {type_name}")
+  _pretty_printers[type_name] = printer
+
+def add_re_printer(type_re, printer):
+  """Add a new printer by specifying a structure.
+
+  Parameters
+  ----------
+  type_name : string
+    The regex to match against the type to pretty print
+      
+  printer : dict
+      "summary" - lambda(v) : string (optional)
+        - Raw summary.
+        - Can call summary() to generate a default summary of all elements.
+        - If not specified, will show nothing for the summary.
+      "views" - list<dict> (optional)
+        - Each dict has the following members:
+          "name" - string (optional)
+            - Name of the view.  Node will have that name with <> around it.
+            - Recommend to at least capitalise first letter.
+            - If not specified, will show as <View N> where N is the view index.
+          "summary" - lambda(v) : string (optional)
+            - View summary.
+            - Can call summary() to generate a default summary of all elements.
+            - If not specified, will show nothing for the summary.
+          "nodes" - list (optional)
+            - An even number of elements, where:
+              - 1st element is the name of the element, and 
+              - 2nd element is a lambda(v) : {gdb.Value | any}
+          "node" - class object (optional)
+            - For complex views, it may be necessary to write a full blown class
+              pretty printer.
+            - Specifying this will prevent "nodes" item from being looked at.
+        "default_view" - string (optional)
+          - Name of view to show at top level.
+          - If not specified, the raw view will be at top level.
+  """
+  log(f"Adding regex printer for type: {type_re}")
+  _pretty_printers_re.append( (re.compile(type_re), printer) )
+
+def _match_printer(type_str):
+  if type_str in _pretty_printers:
     log(f"Exact match for type: {type_str}")
-    return pretty_printers[type_str]
-  for (regex, printer) in pretty_printers_re:
+    return _pretty_printers[type_str]
+  for (regex, printer) in _pretty_printers_re:
     if regex.match(type_str):
       log(f"Regex match for type: {type_str} with {regex.pattern}")
       return printer
@@ -103,7 +224,6 @@ def _is_bidirectional(it):
   except gdb.error:
     return False
 
-# gdb_printers.py (top-level helper)
 def call0(val, method):
   with GdbConvenienceVars(('pp_self', val)):
     return int(gdb.parse_and_eval(f'$pp_self.{method}()'))
@@ -131,15 +251,15 @@ def get_member_value(val, member_name, adjust_return_type=lambda t: t):
         log(f"get_member_value calling function member {member_name}()")
         return adjust_return_type(member())
       except Exception as e:
-        log(f"get_member_value call exception: {e}")
+        log(f"get_member_value call exception: {e}\n  {traceback.format_exc()}")
         return None
   except Exception as e:
     # Fallback: call it directly, avoids "address of method" on overloads
     log(f"get_member_value exception: {e} ; trying call {member_name}()")
     try:
-      gdb.set_convenience_variable('$_self', val)
-      res = gdb.parse_and_eval(f'$_self.{member_name}()')
-      return adjust_return_type(res)
+      with GdbConvenienceVars(('pp_self', val)):
+        res = gdb.parse_and_eval(f'$pp_self.{member_name}()')
+        return adjust_return_type(res)
     except Exception as e2:
       log(f"get_member_value fallback exception: {e2}")
       try:
@@ -147,9 +267,6 @@ def get_member_value(val, member_name, adjust_return_type=lambda t: t):
       except Exception as e3:
         log(f"get_member_value call0 exception: {e3}")
         return None
-    finally:
-      # setting to None avoids convenience variable from leaking into other calls
-      gdb.set_convenience_variable('$_self', None)
 
 def get_c_range_and_size(val, begin_member_name, end_member_name, size_member_name=None):
   """ Get (begin, end) gdb.Values from a container-like `val` """
@@ -171,6 +288,11 @@ class GdbConvenienceVars:
        exiting the with statement, the gdb convenience variables will be
        restored to what they were prior to the execution of the block.
 
+    Parameters
+    ----------
+    name_value_pairs : List[ Tuple[string, gdb.Value], ... ]
+        A list of name value tuples to use as convenience variables.
+    
     Raises
     ------
     ValueError
@@ -228,8 +350,6 @@ def emit_chunked_elements(c_range_and_size, chunk_size=16):
     # 2) Random-access iterators via C++ evaluator
     if _has_random_access(begin, end):
       with GdbConvenienceVars(('_b', begin), ('_e', end)):
-        # gdb.set_convenience_variable('$_b', begin)
-        # gdb.set_convenience_variable('$_e', end)
         length = int(size) if size is not None else _to_int(gdb.parse_and_eval('$_e - $_b'))
         for i in range(0, length, chunk_size):
           n = chunk_size if i + chunk_size <= length else (length - i)
@@ -239,9 +359,6 @@ def emit_chunked_elements(c_range_and_size, chunk_size=16):
 
     # 3) Forward / bidirectional: scan from begin to end (or until `size`)
     with GdbConvenienceVars(('_it', begin), ('_end', end)):
-      # gdb.set_convenience_variable('$_it', begin)
-      # gdb.set_convenience_variable('$_end', end)
-
       def _at_end():
         # If the iterator type doesn't support ==, this will throw; we then
         # rely purely on `size`.
@@ -273,42 +390,94 @@ def emit_chunked_elements(c_range_and_size, chunk_size=16):
         i += steps
 
   except gdb.error as e:
-    log(f'emit_chunked_elements gdb.error: {e}')
+    log(f'emit_chunked_elements gdb.error: {e}\n  {traceback.format_exc()}')
   except Exception as e:
-    log(f'emit_chunked_elements exception: {e}')
+    log(f'emit_chunked_elements exception: {e}\n  {traceback.format_exc()}')
 
 def emit_elements(it, offset, size):
   """ Emit elements of an iterator one by one, up to `size` elements,
-      starting at `offset` """
+      showing starting at `offset` """
   try:
-    gdb.set_convenience_variable('$_it', it)
-    i = 0
+    with GdbConvenienceVars(('pp_it', it)):
+      i = 0
 
-    # emit up to size elements
-    while i < size:
-      yield f'[{offset + i}]', gdb.parse_and_eval('$_it').dereference()
-      gdb.parse_and_eval('++$_it')
-      i += 1
+      # emit up to size elements
+      while i < size:
+        yield f'[{offset + i}]', gdb.parse_and_eval('$pp_it').dereference()
+        gdb.parse_and_eval('++$pp_it')
+        i += 1
 
   except gdb.error as e:
-    log(f'emit_elements gdb.error: {e}')
+    log(f'emit_elements gdb.error: {e}\n  {traceback.format_exc()}')
   except Exception as e:
-    log(f'emit_elements exception: {e}')
+    log(f'emit_elements exception: {e}\n  {traceback.format_exc()}')
 
-def summary(named=False, show_type=True):
-  def named_summary(v):
-    summary = f"{{r={int(v['r'])}, g={int(v['g'])}, b={int(v['b'])}, a={int(v['a'])}}}"
+def summary(named=False, show_type=True, show_char_as_int=True):
+  """Returns a function that will output the values of the members as a braced,
+     comma separated list.
+
+  Parameters
+  ----------
+  named : bool, optional
+      States if the fields are to be named or not, by default False
+  show_type : bool, optional
+      States if to show the type of the object before the fields, by default True
+  show_char_as_int : bool, optional
+      States if chars are to be displayed as integers (without the character it
+      represent showing up after the numeric value).
+
+  """
+  if show_char_as_int:
+    val_to_str = lambda v: \
+      str(
+        _to_int(v)
+        if v.type in (gdb.lookup_type("char"), gdb.lookup_type("unsigned char"))
+        else v
+      )
+  else:
+    val_to_str = lambda v: str(v)
+
+  if named:
+    field_entry = lambda v, f: f.name + "=" + val_to_str(v[f.name])
+  else:
+    field_entry = lambda v, f: val_to_str(v[f.name])
+
+  def summary(val):
+    try:
+      fields = val.type.fields()
+      if len(fields) > 0:
+        summary = "{ "
+        field_count = 0
+        for i in range(len(fields)):
+          field = fields[i]
+          if (getattr(field, "is_base_class", False) is False and 0 != getattr(field, "bitpos", 0)):
+            summary += field_entry(val, field)
+            field_count += 1
+            break
+
+        for field_i in range(i+1, len(fields)):
+          field = fields[field_i]
+          if getattr(field, "is_base_class", False):
+            continue
+          if getattr(field, "bitpos", None) is not None:
+            summary += ", " + field_entry(val, field)
+            field_count += 1
+        
+        if (field_count):
+          summary += " }"
+        else:
+          summary = "{}"
+      else:
+        summary = "{}"
+    except Exception as e:
+      log(f"named_summary exception: {e}\n  {traceback.format_exc()}")
+      return
+
     if show_type:
-      summary = f"{v.type} {summary}"
+      summary = f"{val.type} {summary}"
     return summary
   
-  def unnamed_summary(v):
-    summary = f"{{{int(v['r'])}, {int(v['g'])}, {int(v['b'])}, {int(v['a'])}}}"
-    if show_type:
-      summary = f"{v.type} {summary}"
-    return summary
-  
-  return named_summary if named else unnamed_summary
+  return summary
 
 def emit_raw_children(val):
   """ Emit raw children of a gdb.Value if possible """
@@ -319,7 +488,7 @@ def emit_raw_children(val):
       elif getattr(field, "bitpos", None) is not None:
         yield field.name, val[field.name] # non-static field
   except Exception as e:
-    log(f"emit_raw_children exception: {e}")
+    log(f"emit_raw_children exception: {e}\n  {traceback.format_exc()}")
     return
 
 def emit_static_children(val):
@@ -331,7 +500,7 @@ def emit_static_children(val):
       yield field.name, val[field.name]
     return
   except Exception as e:
-    log(f"emit_raw_children exception: {e}")
+    log(f"emit_raw_children exception: {e}\n  {traceback.format_exc()}")
     return
   
   t = val.type.strip_typedefs()
@@ -372,7 +541,7 @@ def has_static(val):
       if getattr(field, "bitpos", None) is None:
         return True
   except Exception as e:
-    log(f"has_static exception for {val.type}: {e}")
+    log(f"has_static exception for {val.type}: {e}\n  {traceback.format_exc()}")
   return False
 
   t = val.type.strip_typedefs()
@@ -437,7 +606,7 @@ class DefaultPrinter:
   def view_name(self, index):
     if self.printer is not None and 'views' in self.printer and index < len(self.printer['views']):
       return self.printer['views'][index]['name']
-    return f"<view {index}>"
+    return f"View {index}"
   
   def children(self):
     log(f"DefaultPrinter children for {self.val.type}\n{self.printer}")
@@ -464,8 +633,6 @@ class DefaultPrinter:
         log(f"top-level view for {self.val.type} = {default_view_name}")
         yield from ViewPrinter(self.val, default_view).children()
 
-    log("Continuing to other views...\n")
-    
     # Show static/raw/views views
     if has_static(self.val):
       log(f"has_static for {self.val.type}")
@@ -478,8 +645,9 @@ class DefaultPrinter:
 
       # show views other than default_view
       for i in range(view_count):
-        if self.view_name(i) != default_view_name:
-          yield f"<{self.view_name(i)}>", make_enums_tag(self.val, VIEW_ENUM(i))
+        view_name = self.view_name(i)
+        if view_name != default_view_name:
+          yield f"<{view_name}>", make_enums_tag(self.val, VIEW_ENUM(i))
 
 class StaticPrinter:
   """Handler for static members only"""
@@ -511,23 +679,23 @@ class ViewPrinter:
 
   def children(self):
     if 'node' in self.view:
-      log(f"ViewPrinter node for {self.val.type} = {self.view['node']}\n")
+      log(f"ViewPrinter node for {self.val.type} = {self.view['node']}")
       node = self.view['node'](self.val)
       yield from node.children()
     elif 'nodes' in self.view:
-      log(f"ViewPrinter raw nodes for {self.val.type}\n")
+      log(f"ViewPrinter raw nodes for {self.val.type}")
       nodes = self.view['nodes']
       for i in range(0, len(nodes), 2):
         name = nodes[i]
         func = nodes[i+1]
-        log(f"  node {name} = {func(self.val)}\n")
+        log(f"  node {name} = {func(self.val)}")
         try:
           yield name, func(self.val)
         except Exception as e:
-          log(f"ViewPrinter child exception: {e}")
+          log(f"ViewPrinter child exception: {e}\n  {traceback.format_exc()}")
           yield name, "<error>"
       if 'elements' in self.view:
-        log(f"ViewPrinter elements for {self.val.type}\n")
+        log(f"ViewPrinter elements for {self.val.type}")
         yield from self.view['elements'](self.val)
     return
   
@@ -553,7 +721,7 @@ def _lookup_type(val):
   type_str = str(val.type)
   log(f"type: {type_str}")
   
-  printer = match_printer(type_str)
+  printer = _match_printer(type_str)
   if printer is not None:
     log(f"Matched printer for type: {type_str}")
     return DefaultPrinter(val, printer)
@@ -582,7 +750,7 @@ def _lookup_type(val):
       # everything else is a view
       view_index = enums[0] - VIEW_ENUM_
       log(f"ViewPrinter index {view_index} for {actual_val.type}")
-      return ViewPrinter(actual_val, pretty_printers[base_key]["views"][view_index])
+      return ViewPrinter(actual_val, _pretty_printers[base_key]["views"][view_index])
       
   log(f"No printer found for type: {type_str}")
   return None
@@ -611,15 +779,18 @@ def disable_all_printers():
 # TODO: Get iterator chunking working
 # disable_all_printers()
 
-# log("Enabling custom pretty-printers\n")
-# gdb.pretty_printers.append(_lookup_type)
+log("Enabling custom pretty-printers")
+gdb.pretty_printers.append(_lookup_type)
 
-# add_printer('std::vector<.*>', {
-#   'summary': lambda v: "std::vector", #f"std::vector(size={get_member_value(v, 'size', int)} capacity={get_member_value(v, 'capacity', int)})",
-#   'views': [
-#     {
-#       'name': 'Elements',
-#       'elements': lambda v: emit_chunked_elements(get_c_range_and_size(v.cast(gdb.lookup_type("std::_Vector_base<int, std::allocator<int> >")), '_M_start', '_M_finish'), chunk_size=16)
-#     },
-#   ]
-# })
+# This won't be pretty printed because it is handled by another printer.
+#
+# Uncomment call to disable_all_printers() above to enable.
+add_printer('std::vector<.*>', {
+  'summary': lambda v: "std::vector", #f"std::vector(size={get_member_value(v, 'size', int)} capacity={get_member_value(v, 'capacity', int)})",
+  'views': [
+    {
+      'name': 'Elements',
+      'elements': lambda v: emit_chunked_elements(get_c_range_and_size(v.cast(gdb.lookup_type("std::_Vector_base<int, std::allocator<int> >")), '_M_start', '_M_finish'), chunk_size=16)
+    },
+  ]
+})
