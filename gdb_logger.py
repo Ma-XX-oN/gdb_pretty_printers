@@ -1,12 +1,20 @@
 import gdb
 
-def log(msg):
-    """Log a message to gdb console.
+logger = open("gdb_log.txt", "w")
 
-    Parameters
-    ----------
-    msg : str
-        The message to log.
-    """
-    gdb.write(f"[LOGGER]{"" if (msg[0] == "[") else " "}{msg}\n", gdb.STDOUT)
+def log(msg):
+  """Log a message to gdb console.
+
+  Parameters
+  ----------
+  msg : str
+      The message to log.
+  """
+  log_msg = f"[LOGGER]{"" if (msg[0] == "[") else " "}{msg}\n"
+  gdb.write(log_msg, gdb.STDOUT)
+  gdb.flush()
+
+  if logger:  
+    logger.write(log_msg)
+    logger.flush()
 
