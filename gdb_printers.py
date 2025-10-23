@@ -2,52 +2,6 @@
 Framework to make a cohesive, easy to use pretty printer for gdb.  This uses
 synthetic nodes to group data together into static, raw, and other views making
 it easier to read and find information.
-
-To enable, add this to the .vscode/launch.json file:
-```
-          // VV Add these lines to "configurations" => "setupCommands" list VV
-          {
-            "description": "Use relative paths to avoid Windows escaping",
-            // Change this to the folder where you have placed the gdb folder.
-            "text": "-environment-cd ${workspaceFolder}/gdb"
-          },
-          {
-            "description": "Add ${workspaceFolder} (i.e. current dir) to module search path.",
-            "text": "-interpreter-exec console \"python import sys; sys.path.insert(0, '.')\""
-          },
-          // Comment out this section if no logging is needed.
-          // VVV LOCAL LOGGING VVV
-          {
-            "description": "Turn on external gdb logger (LPP)",
-            "text": "-interpreter-exec console \"python import gdb_logger as LPP; LPP.logging_on('gdb_log.txt') \""
-          },
-          {
-              "description": "Configure logging",
-              "text": "-interpreter-exec console \"set logging overwrite on\"",
-              "ignoreFailures": true
-          },
-          {
-              "description": "Set log file",
-              "text": "-interpreter-exec console \"set logging file gdb.txt\"",
-              "ignoreFailures": true
-          },
-          {
-              "description": "Enable logging",
-              "text": "-interpreter-exec console \"set logging on\"",
-              "ignoreFailures": true
-          },
-          // ^^^ LOCAL LOGGING
-          {
-            "description": "Import user pretty printers (UPP)",
-            // Change if this is not the name of your printer python file.
-            "text": "-interpreter-exec console \"python import gdb_user_printers as UPP\""
-          },
-          // ^^ Add these lines to "configurations" => "setupCommands" list ^^
-
-      // Additional logging if needed under "configurations" only output to DEBUG CONSOLE
-      "logging": { "engineLogging": true, "trace": true, "traceResponse": true }
-```
-
 """
 import gdb
 import re
