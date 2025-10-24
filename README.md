@@ -4,6 +4,39 @@ Framework to make a cohesive, easy-to-use pretty printer for gdb.  This uses
 synthetic nodes to group data together into static, raw, and other views making
 it easier to read and find information.
 
+An object will look something like this in the Variable/Watch pane:
+```
+┰─ summary               # Raw or default view summary
+┠┰ <Static>              # If static items in user type
+┃┠─ static_item_0
+┃┠─ ...
+┃┖─ static_item_n
+┠┰ <Raw> raw_summary     # If there are views and a default view was picked
+┃┠─ raw_item_0
+┃┠─ ...
+┃┖─ raw_item_n
+┠┰ <View 0> view_summary # If named, then the name of the view will be displayed
+┃┠─ view_0_item_0
+┃┠─ ...
+┃┖─ view_0_item_n
+┃...
+┠┰ <View n> view_summary # If named, then the name of the view will be displayed
+┃┠─ view_n_item_0
+┃┠─ ...
+┃┖─ view_n_item_n
+┠─ item0 = value0        # either the raw or default view items at top level
+┠┰ item1 item_summary
+┃┠─ sub_item_0
+┃┠─ ...
+┃┖─ sub_item_n
+┃...
+```
+
+NOTES:
+------
+- Summaries don't have to be specified in which case they'll be blank.
+- `n` represents some value and doesn't mean that they are all the same `n`.
+
 ## What Makes This "Better"?
 1. Synthetic nodes allow for grouping of related information together for
    different views of the same object.
@@ -21,20 +54,20 @@ from gdb_printers import add_printer, summary
 # other printers here.
 
 add_printer("ColorRGBA", {
-    "summary": summary(named=True, show_type=True), # summary for raw view
-    # "default_view": "Alpha",   # optional default view if not raw
-    "views": [
-      {
-        "name": "Alpha",
-        "summary": summary(named=True, show_type=False), # summary for Alpha view
-        "nodes": (
-          'red',   lambda v: v['r'],
-          'green', lambda v: v['g'],
-          'blue',  lambda v: v['b']
-        )
-      },
-      ...
-    ]
+  "summary": summary(named=True, show_type=True), # summary for raw view
+  # "default_view": "Alpha",   # optional default view if not raw
+  "views": [
+    {
+      "name": "Alpha",
+      "summary": summary(named=True, show_type=False), # summary for Alpha view
+      "nodes": (
+        'red',   lambda v: v['r'],
+        'green', lambda v: v['g'],
+        'blue',  lambda v: v['b']
+      )
+    },
+    ...
+  ]
 })
 ```
 To enable, merge this to the .vscode/launch.json file:
@@ -67,7 +100,7 @@ To enable, merge this to the .vscode/launch.json file:
         // VVV LOCAL LOGGING VVV
         {
           "description": "Turn on external gdb logger for pretty printers (LPP)",
-          "text": "-interpreter-exec console \"python import gdb_logger as LPP; LPP.logging_on(r'${config:gdb.prettyPrinter.log2}')\""
+          "text": "-interpreter-exec console \"python import gdb_logger as LPP; LPP.logging_on(r'${config:gdb.prettyPrinter.log_pp}')\""
         },
         {
             "description": "Configure logging",
@@ -112,10 +145,10 @@ one.
       "rootModule": "user_printers", // Change to point at correct root pretty print module to import.
       // Stored in the workspace root.  Shows all gdb commands and pretty
       // printer logging.
-      "log": "gdb2.txt",
+      "log": "gdb.log",
       "logOn": "off", //"on",  // Valid values are on/off
       // Stored in the workspace root.  Shows only pretty printer logging.
-      "log2": "", //"gdb_log.txt",  // If empty string then no logging.
+      "log_pp": "", //"gdb_pp.log",  // If empty string then no logging.
     }
   }
 }
