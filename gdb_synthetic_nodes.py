@@ -9,6 +9,7 @@ are capable of being reverted back to their original type quickly and easily.
 
 import gdb
 import re
+from gdb_logger import log
 
 def make_enums_tag(val, enum_tuple):
   """Create a synthetic tag value for gdb.
@@ -51,10 +52,42 @@ def extract_enums_tag(val):
   tuple[int, ...]
     Tuple of decoded integers (in the same order they were encoded).
   """
-  type_str = str(val.type)
-  matches = re.findall(r'\[(\d+)\]', type_str)
+  matched = get_type_tag_matches(str(val.type))
+  matches = SYNTH_TAGS_RE.findall(matched.group('tags'))
   return tuple(int(m) for m in matches)
 
+SYNTH_TAG_TYPE_RE = re.compile(r'^(?P<type>.+?)(?P<open>\()?\*\(\*\*\*\*\)' \
+                          r'(?P<tags>(?:\[\d+\])+)(?(open)\))(?P<array>.*)$')
+
+SYNTH_TAGS_RE = re.compile(r'\[(\d+)\]')
+
+def get_type_tag_matches(type_str):
+  """Gets a match object with the following groups:
+
+  'type' - base type of the type
+  'array' - any array items if any
+  'tags' - A set of [] enclosed ints to state the enums.
+
+  Parameters
+  ----------
+  type_str : string
+      The stringified type. 
+
+  Returns
+  -------
+  Match Object
+      See description for what groups are available.
+
+  Raises
+  ------
+  ValueError
+      The type_str doesn't represent a tag type.
+
+  """
+  matches = SYNTH_TAG_TYPE_RE.search(type_str)
+  if matches is None:
+    raise ValueError(f"couldn't match tag type '{type_str}'")
+  return matches
 
 def recover_value(val):
   """Recover the original value from a synthetic tag.
@@ -72,6 +105,10 @@ def recover_value(val):
   gdb.Value
     The original value with its proper base type.
   """
-  i = str(val.type).index(' *(****)[')
-  base_type = str(val.type)[0:i]
-  return val.cast(gdb.lookup_type(base_type).pointer()).dereference()
+  matched = get_type_tag_matches(str(val.type))
+  base_type = gdb.lookup_type(matched.group('type'))
+  if matched.group('array'):
+    array_sizes = SYNTH_TAGS_RE.findall(matched.group('array'))
+    for array_size in reversed(array_sizes):
+      base_type = base_type.array(array_size)
+  return val.cast(base_type.pointer()).dereference()
