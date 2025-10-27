@@ -54,8 +54,8 @@ add_printer("ColorRGBA", {
         "name": "Alpha",
         "summary": summary(named=False, show_type=False),
         "nodes": (
-          "raw",        lambda v: v['a'],
-          "normalized", lambda v: gdb.Value(float(v['a']) / 255.0)
+          "python string", lambda _: "v['a']",
+          "normalized",    lambda v: gdb.Value(float(v['a']) / 255.0)
         ),
         # "elements": lambda v: emit_chunked_elements(v.begin(), v.end())
       },
@@ -67,3 +67,7 @@ add_printer("ColorRGBA", {
     ]
   }
 )
+
+add_printer("mystruct", {
+  "summary": summary(named=True)
+})
