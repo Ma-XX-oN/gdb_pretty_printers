@@ -102,16 +102,16 @@ def _match_printer(type_str):
 
 # Synthetic node tags
 # Each tag is a tuple of integers; the first integer indicates the kind of node.
-_STATIC_ENUM_I = 0
-_STATIC_ENUM = (_STATIC_ENUM_I,)
-_RAW_ENUM_I = 1
-_RAW_ENUM = (_RAW_ENUM_I,)
-_CHUNK_ENUM_I = 2
-def _CHUNK_ENUM(offset, chunk_size) -> Tuple[int, ...]:
-  return (_CHUNK_ENUM_I, offset, chunk_size)
-_MSG_ENUM_I = 3
+_MSG_ENUM_I = 0
 def _MSG_ENUM(string) -> Tuple[int, ...]:
   return (_MSG_ENUM_I, *list(string.encode("utf-8")))
+_STATIC_ENUM_I = 1
+_STATIC_ENUM = (_STATIC_ENUM_I,)
+_RAW_ENUM_I = 2
+_RAW_ENUM = (_RAW_ENUM_I,)
+_CHUNK_ENUM_I = 3
+def _CHUNK_ENUM(offset, chunk_size) -> Tuple[int, ...]:
+  return (_CHUNK_ENUM_I, offset, chunk_size)
 _VIEW_ENUM_I = 4
 def _VIEW_ENUM(view_index) -> Tuple[int, ...]:
   return (_VIEW_ENUM_I + view_index,)
@@ -537,7 +537,7 @@ class MessagePrinter(gdb.ValuePrinter):
     return 0
 
   def children(self):
-    yield "*This is only a message*", None
+    yield "Parent node is a message", None
 
   def to_string(self):
     return self.string
@@ -633,6 +633,8 @@ class DefaultPrinter(gdb.ValuePrinter):
         #       dropdown.  Might be able to use those types instead of these
         #       numeric enums typed as a way to make views.
         #       Need to mull that over for a bit.
+        #
+        #       NOPE! Bastards marked gdb.Type as final!
         pass
       else:
         log(f"top-level view for {self.val.type} = {default_view_name}")
