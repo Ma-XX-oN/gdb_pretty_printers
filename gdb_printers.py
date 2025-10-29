@@ -7,20 +7,24 @@ import gdb
 import re
 import traceback
 
-from typing import Tuple, TypedDict, Required, NotRequired, Callable, Optional,\
-   TypeVar, Protocol, cast, overload
+from typing import TypedDict, Required, NotRequired, Callable, Optional, \
+   TypeVar, TypeAlias, Protocol, Union, Any, cast, overload
 from collections.abc import Iterator
 from gdb_logger import log
 from gdb_synthetic_nodes import make_enums_tag, extract_enums_tag, recover_value
 
 MAX_SUMMARY_LEN = 100
 
+ValueLike: TypeAlias = gdb.Value | str | None
+PrinterChild:     TypeAlias = tuple[str, ValueLike]
+PrinterChildren:  TypeAlias = Iterator[PrinterChild]
+
 class PrinterLike(Protocol):
-    def children(self) -> Iterator[tuple[str, gdb.Value]]: ...
-    @overload
-    def to_string(self) -> str: ...
-    @overload
-    def to_string(self, max_len : int = MAX_SUMMARY_LEN, /) -> str: ...
+  def children(self) -> PrinterChildren: ...
+  @overload
+  def to_string(self) -> str: ...
+  @overload
+  def to_string(self, max_len : int = MAX_SUMMARY_LEN, /) -> str: ...
 
 ValuePrinterClass = TypeVar("ValuePrinterClass", bound = PrinterLike, covariant=True)
 
@@ -31,18 +35,18 @@ class View(TypedDict):
   name: Required[str]
   summary: NotRequired[Callable[[gdb.Value, int], str] | str]
   node: NotRequired[PrinterCtor[PrinterLike]]
-  nodes: NotRequired[Tuple[Tuple[str, Callable[[gdb.Value], str | gdb.Value]], ...]]
+  nodes: NotRequired[tuple[tuple[str, Callable[[gdb.Value], str | gdb.Value]], ...]]
   
 class Printer(TypedDict):
   summary: NotRequired[Callable[[gdb.Value, int], str] | str]
   default_view: NotRequired[str]
-  views: NotRequired[Tuple[View, ...]]
+  views: NotRequired[tuple[View, ...]]
 
-_pretty_printers = {}
-_pretty_printers_re = []
+_pretty_printers : dict[str, Printer] = {}
+_pretty_printers_re : list[tuple[re.Pattern[str], Printer]] = []
 
 
-def add_printer(type_name, printer : Printer):
+def add_printer(type_name : str, printer : Printer):
   """Add a new printer by specifying a structure.
 
   Parameters
@@ -80,7 +84,7 @@ def add_printer(type_name, printer : Printer):
   log(f"Adding exact printer for type: {type_name}")
   _pretty_printers[type_name] = printer
 
-def add_re_printer(type_re, printer : Printer):
+def add_re_printer(type_re : str, printer : Printer):
   """Add a new printer by specifying a structure.
 
   Parameters
@@ -118,7 +122,7 @@ def add_re_printer(type_re, printer : Printer):
   log(f"Adding regex printer for type: {type_re}")
   _pretty_printers_re.append( (re.compile(type_re), printer) )
 
-def _match_printer(type_str : str):
+def _match_printer(type_str : str) -> Printer | None:
   if type_str in _pretty_printers:
     log(f"Exact match for type: {type_str}")
     return _pretty_printers[type_str]
@@ -131,17 +135,17 @@ def _match_printer(type_str : str):
 # Synthetic node tags
 # Each tag is a tuple of integers; the first integer indicates the kind of node.
 _MSG_ENUM_I = 0
-def _MSG_ENUM(string : str) -> Tuple[int, ...]:
+def _MSG_ENUM(string : str) -> tuple[int, ...]:
   return (_MSG_ENUM_I, *list(string.encode("utf-8")))
 _STATIC_ENUM_I = 1
 _STATIC_ENUM = (_STATIC_ENUM_I,)
 _RAW_ENUM_I = 2
 _RAW_ENUM = (_RAW_ENUM_I,)
 _CHUNK_ENUM_I = 3
-def _CHUNK_ENUM(offset : int, chunk_size : int) -> Tuple[int, ...]:
+def _CHUNK_ENUM(offset : int, chunk_size : int) -> tuple[int, ...]:
   return (_CHUNK_ENUM_I, offset, chunk_size)
 _VIEW_ENUM_I = 4
-def _VIEW_ENUM(view_index : int) -> Tuple[int, ...]:
+def _VIEW_ENUM(view_index : int) -> tuple[int, ...]:
   return (_VIEW_ENUM_I + view_index,)
 
 def INCOMPLETE():
@@ -270,7 +274,9 @@ def get_c_range_and_size(val, begin_member_name, end_member_name, size_member_na
 class GdbConvenienceVars:
   """Scoped convenience vars: sets on enter, restores/removes on exit."""
 
-  def __init__(self, *name_value_pairs):
+  _saved : list[tuple[str, gdb.Value | None]]
+
+  def __init__(self, *name_value_pairs : tuple[str, gdb.Value]):
     """Use within a with statement to setup gdb convenience variables by
        passing in a list of (name, gdb.Value) pairs to initialise them.  On
        exiting the with statement, the gdb convenience variables will be
@@ -278,7 +284,7 @@ class GdbConvenienceVars:
 
     Parameters
     ----------
-    name_value_pairs : List[ Tuple[string, gdb.Value] ]
+    name_value_pairs : List[ tuple[string, gdb.Value] ]
         A list of name value tuples to use as convenience variables.
 
     Raises
@@ -317,7 +323,7 @@ def emit_chunked_elements(c_range_and_size, chunk_size=16):
   Yields
   ------
   tuple[str, gdb.Value]
-      Tuple of chunk range description and corresponding synthetic tag
+      tuple of chunk range description and corresponding synthetic tag
   """
   begin, end = c_range_and_size
   size = None
@@ -382,7 +388,7 @@ def emit_chunked_elements(c_range_and_size, chunk_size=16):
   except Exception as e:
     log(f"emit_chunked_elements exception: {e}\n  {traceback.format_exc()}")
 
-def emit_elements(it, offset, size):
+def emit_elements(it : gdb.Value, offset : int, size : int):
   """ Emit elements of an iterator one by one, up to `size` elements,
       showing starting at `offset` """
   try:
@@ -403,12 +409,14 @@ def emit_elements(it, offset, size):
 import inspect
 from inspect import Parameter
 
-def arity(fn):
+Arity = tuple[int, Union[int, float], set[str], bool, bool]
+
+def arity(fn : Callable[..., Any]) -> Arity:
   """Return (min_positional, max_positional, required_kwonly, has_varargs, has_varkw)."""
   sig = inspect.signature(fn)
   min_pos = max_pos = 0
   has_varargs = has_varkw = False
-  required_kwonly = set()
+  required_kwonly : set[str] = set()
 
   for p in sig.parameters.values():
     k = p.kind
@@ -431,7 +439,8 @@ def arity(fn):
 CHAR_TYPES = (gdb.lookup_type("char"), gdb.lookup_type("unsigned char"))
 USER_TYPE_CODES = (gdb.TYPE_CODE_STRUCT, gdb.TYPE_CODE_UNION)
 
-def summary(named=False, show_type=True, show_char_as_int=True):
+def summary(named : bool = False, show_type : bool = True, show_char_as_int : bool = True) \
+  -> Callable[[gdb.Value, int], str]:
   """Returns a function that will output the values of the members as a braced,
      comma separated list.
 
@@ -446,7 +455,7 @@ def summary(named=False, show_type=True, show_char_as_int=True):
       represent showing up after the numeric value).
 
   """
-  summary = ""
+  summary : str = ""
   def v_to_str(v : gdb.Value, max_len : int):
     printerObj = cast(Optional[PrinterLike], gdb.default_visualizer(v))
     if printerObj and arity(printerObj.to_string)[1] == 1:
@@ -624,7 +633,7 @@ class MessagePrinter(gdb.ValuePrinter):
     log("Getting num_children")
     return 0
 
-  def children(self):
+  def children(self) -> PrinterChildren:
     yield "Parent node is a message", None
 
   def to_string(self, _ : int = MAX_SUMMARY_LEN):
@@ -709,7 +718,7 @@ class DefaultPrinter(gdb.ValuePrinter):
       return self.printer["views"][index]["name"]
     return f"View {index}"
 
-  def children(self):
+  def children(self) -> PrinterChildren:
     log(f"DefaultPrinter children for {self.val.type}\n{self.printer}")
 
     view_count = self.count_views()
@@ -814,7 +823,7 @@ class ArrayPrinter(gdb.ValuePrinter):
       self.summary += array
     return self.summary
 
-  def children(self):
+  def children(self) -> PrinterChildren:
     if not self.python_string:
       for i in range(self.low, self.high + 1):
         yield f"[{i}]", self.val[i]
@@ -826,7 +835,7 @@ class StaticPrinter(gdb.ValuePrinter):
   def __init__(self, val : gdb.Value):
     self.val = val
 
-  def children(self):
+  def children(self) -> PrinterChildren:
     yield from emit_static_children(self.val)
 
   def to_string(self, _ : int = MAX_SUMMARY_LEN):
@@ -834,11 +843,11 @@ class StaticPrinter(gdb.ValuePrinter):
 
 class RawPrinter(gdb.ValuePrinter):
   """Handler for raw view of members"""
-  def __init__(self, val : gdb.Value, printer = None):
+  def __init__(self, val : gdb.Value, printer : Printer | None = None):
     self.val = val
     self.printer = printer
 
-  def children(self):
+  def children(self) -> PrinterChildren:
     yield from emit_raw_children(self.val)
 
   def to_string(self, max_len : int = MAX_SUMMARY_LEN):
@@ -852,7 +861,7 @@ class ViewPrinter(gdb.ValuePrinter):
     self.val = val
     self.view = view
 
-  def children(self):
+  def children(self) -> PrinterChildren:
     if "node" in self.view:
       log(f"ViewPrinter node for {self.val.type} = {self.view["node"]}")
       node = self.view["node"](self.val)
@@ -881,12 +890,12 @@ class ViewPrinter(gdb.ValuePrinter):
 
 class ChunkPrinter(gdb.ValuePrinter):
   """Handler for chunked elements"""
-  def __init__(self, val : gdb.Value, offset, chunk_size):
+  def __init__(self, val : gdb.Value, offset : int, chunk_size : int):
     self.val = val
     self.offset = offset
     self.chunk_size = chunk_size
 
-  def children(self):
+  def children(self) -> PrinterChildren:
     yield from emit_elements(self.val, self.offset, self.chunk_size)
 
   def to_string(self, _ : int = MAX_SUMMARY_LEN):
@@ -984,3 +993,17 @@ gdb.pretty_printers.append(_lookup_type)
 #     },
 #   ]
 # })
+
+import importlib, sys
+def reload():
+    for name in [
+        'gdb_pretty_printers',
+        'gdb_synthetic_nodes',
+        'gdb_logger',
+    ]:
+        mod = sys.modules.get(name)
+        if mod:
+            importlib.reload(mod)
+        else:
+            __import__(name)
+    print("Pretty-printers reloaded.")

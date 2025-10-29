@@ -1,13 +1,13 @@
 import gdb
-
+from typing import Callable
 logger = None
-def logging_on(log_filename):
+def logging_on(log_filename : str) -> None:
   if log_filename == '':
     return
   global logger
   logger = open(log_filename, "w")
 
-def log(msg):
+def log(msg : str | Callable[[], str]) -> None:
   """Log a message to gdb console.
 
   Parameters
@@ -15,7 +15,9 @@ def log(msg):
   msg : str
       The message to log.
   """
-  # gdb_logger = _gdb_logging_enabled()
+  if callable(msg):
+    msg = msg()
+
   log_msg = f"[LOGGER]{"" if (msg[0] == "[") else " "}{msg}\n"
 
   gdb.write(log_msg, gdb.STDOUT)

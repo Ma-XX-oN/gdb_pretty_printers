@@ -62,7 +62,7 @@ SYNTH_TAG_TYPE_RE = re.compile(r'^(?P<c>const )?(?P<v>volatile )?(?P<type>.+?)(?
 
 SYNTH_TAGS_RE = re.compile(r'\[(\d+)\]')
 
-def get_type_tag_matches(type_str : str) -> re.Match:
+def get_type_tag_matches(type_str : str) -> re.Match[str]:
   """Gets a match object with the following groups:
 
   'c' - is the base type const
