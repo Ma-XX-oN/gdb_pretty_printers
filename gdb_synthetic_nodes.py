@@ -10,8 +10,9 @@ are capable of being reverted back to their original type quickly and easily.
 import gdb
 import re
 from gdb_logger import log
+from typing import Tuple
 
-def make_enums_tag(val, enum_tuple):
+def make_enums_tag(val : gdb.Value, enum_tuple : Tuple[int, ...]) -> gdb.Value:
   """Create a synthetic tag value for gdb.
 
   The tag is encoded by building nested array types and producing a
@@ -39,7 +40,7 @@ def make_enums_tag(val, enum_tuple):
   return val.address.cast(ptr_type)
 
 
-def extract_enums_tag(val):
+def extract_enums_tag(val : gdb.Value) -> Tuple[int, ...]:
   """Extract encoded enum values from a synthetic tag value.
 
   Parameters
@@ -56,14 +57,16 @@ def extract_enums_tag(val):
   matches = SYNTH_TAGS_RE.findall(matched.group('tags'))
   return tuple(int(m) for m in matches)
 
-SYNTH_TAG_TYPE_RE = re.compile(r'^(?P<type>.+?)(?P<open>\()?\*\(\*\*\*\*\)' \
+SYNTH_TAG_TYPE_RE = re.compile(r'^(?P<c>const )?(?P<v>volatile )?(?P<type>.+?)(?P<open>\()?\*\(\*\*\*\*\)' \
                           r'(?P<tags>(?:\[\d+\])+)(?(open)\))(?P<array>.*)$')
 
 SYNTH_TAGS_RE = re.compile(r'\[(\d+)\]')
 
-def get_type_tag_matches(type_str):
+def get_type_tag_matches(type_str : str) -> re.Match:
   """Gets a match object with the following groups:
 
+  'c' - is the base type const
+  'v' - is the base type volatile
   'type' - base type of the type
   'array' - any array items if any
   'tags' - A set of [] enclosed ints to state the enums.
@@ -89,7 +92,7 @@ def get_type_tag_matches(type_str):
     raise ValueError(f"couldn't match tag type '{type_str}'")
   return matches
 
-def recover_value(val):
+def recover_value(val : gdb.Value) -> gdb.Value:
   """Recover the original value from a synthetic tag.
 
   This retrieve the base type from the synthetic type representation used by
@@ -107,8 +110,13 @@ def recover_value(val):
   """
   matched = get_type_tag_matches(str(val.type))
   base_type = gdb.lookup_type(matched.group('type'))
-  if matched.group('array'):
-    array_sizes = SYNTH_TAGS_RE.findall(matched.group('array'))
+  if matched['v']:
+    base_type = base_type.volatile()
+  if matched['c']:
+    base_type = base_type.const()
+  log(f'type found: {base_type}')
+  if matched['array']:
+    array_sizes = SYNTH_TAGS_RE.findall(matched['array'])
     for array_size in reversed(array_sizes):
       base_type = base_type.array(array_size)
   return val.cast(base_type.pointer()).dereference()

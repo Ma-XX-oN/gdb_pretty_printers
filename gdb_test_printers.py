@@ -1,8 +1,9 @@
 import gdb
-from gdb_printers import add_printer, summary
+from gdb_printers import add_printer, summary, MAX_SUMMARY_LEN
+from typing import Optional
 
 # GDB pretty-printer example for ColorRGBA
-class ComponentsNode:
+class ComponentsNode(gdb.ValuePrinter):
   """Synthetic node for RGB components"""
   def __init__(self, val):
     # val is the original ColorRGBA, not a pointer
@@ -13,10 +14,10 @@ class ComponentsNode:
     yield 'green', self.val['g'] 
     yield 'blue', self.val['b']
 
-  def to_string(self):
-    return None
+  def to_string(self, _:int = MAX_SUMMARY_LEN) -> str:
+    return ''
 
-class AlphaNode:
+class AlphaNode(gdb.ValuePrinter):
   """Synthetic node for alpha channel"""
   def __init__(self, val):
     self.val = val
@@ -25,10 +26,10 @@ class AlphaNode:
     yield 'raw', self.val['a']
     yield 'normalized', gdb.Value(float(self.val['a']) / 255.0)
 
-  def to_string(self):
-    return None
+  def to_string(self, _:int = MAX_SUMMARY_LEN) -> str:
+    return ''
 
-class StatisticsNode:
+class StatisticsNode(gdb.ValuePrinter):
   """Synthetic node for computed values"""
   def __init__(self, val):
     self.val = val
@@ -38,13 +39,13 @@ class StatisticsNode:
     yield 'brightness', gdb.Value(float(brightness))
     yield 'opacity', gdb.Value(float(self.val['a']) / 255.0)
 
-  def to_string(self):
-    return None
+  def to_string(self, _:int = MAX_SUMMARY_LEN) -> str:
+    return ''
 
 add_printer("ColorRGBA", {
     "summary": summary(named=True, show_type=True), # summary for raw view
     # "default_view": "Alpha",
-    "views": [
+    "views": (
       {
         "name": "Components",
         "summary": summary(named=True, show_type=False),
@@ -54,8 +55,8 @@ add_printer("ColorRGBA", {
         "name": "Alpha",
         "summary": summary(named=False, show_type=False),
         "nodes": (
-          "python string", lambda _: "v['a']",
-          "normalized",    lambda v: gdb.Value(float(v['a']) / 255.0)
+          ("python string", lambda _: "v['a']"),
+          ("normalized",    lambda v: gdb.Value(float(v['a']) / 255.0)),
         ),
         # "elements": lambda v: emit_chunked_elements(v.begin(), v.end())
       },
@@ -63,11 +64,11 @@ add_printer("ColorRGBA", {
         "name": "Statistics",
         "summary": '',
         "node": StatisticsNode
-      }
-    ]
+      },
+    )
   }
 )
 
 add_printer("mystruct", {
-  "summary": summary(named=True)
+  "summary": summary(named=True, show_type=False)
 })
